@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-frontend
+  labels:
+    app: nginx-frontend
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+  selector:
+    app: nginx-frontend
+---
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: nginx-frontend
+  labels:
+    app: nginx-frontend
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx-frontend
+      annotations:
+        # What's up with the "\\\\$" below?
+        # We need to end up with "$request_time" in nginx.conf
+        # Bash needs one \ so it doesn't substitute request_time
+        # That \ needs to be escaped for Json, yaml and validation
+        pod.beta.kubernetes.io/init-containers: '[
+            {
+                "name": "configwriter",
+                "image": "busybox",
+                "command": [
+                    "sh",
+                    "-c",
+                    "`echo \"
+                      events{}
+                      http{
+                        add_header X-Response-Time \\\\$request_time always;
+                        add_header X-Upstream-Response-Time \\\\$upstream_response_time always;
+                        server {
+                            location / { proxy_pass http://backend.default; }
+                        }
+                      }\" > /usr/local/nginx/conf/nginx.conf`"
+                ],
+                "volumeMounts": [
+                    {
+                        "name": "config",
+                        "mountPath": "/usr/local/nginx/conf"
+                    }
+                ]
+            }
+        ]'
+    spec:
+      containers:
+      - name: nginx
+        image: gcr.io/google_containers/nginx-slim:0.8
+        ports:
+        - containerPort: 80
+        command:
+        - nginx
+        args:
+        - -g
+        - "daemon off;"
+        - -c
+        - "/usr/local/nginx/conf/nginx.conf"
+        volumeMounts:
+        - name: config
+          mountPath: /usr/local/nginx/conf
+      volumes:
+      - name: config
+        emptyDir: {}
+
